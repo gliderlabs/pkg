@@ -1,12 +1,20 @@
-package main
+package usage
 
 import (
 	"fmt"
+	"log"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"testing"
 )
+
+func Test_RequestLatest(t *testing.T) {
+	pv := &ProjectVersion{"registrator", "v1"}
+	latest, err := RequestLatest(pv)
+	ok(t, err)
+	log.Println(latest)
+}
 
 func Test_FormatV1(t *testing.T) {
 	pv := &ProjectVersion{"registrator", "v1.0.0"}

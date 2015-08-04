@@ -3,73 +3,15 @@ package main
 import (
 	"errors"
 	"flag"
-	"fmt"
 	"log"
 	"os"
-	"strings"
 	"time"
 
+	"github.com/gliderlabs/pkg/usage"
 	"github.com/google/go-github/github"
 	"github.com/inconshreveable/go-keen"
 	"github.com/miekg/dns"
 )
-
-func PtrRecord(pv *ProjectVersion) *dns.PTR {
-	latest := FormatV1(&ProjectVersion{pv.Project, "latest"})
-	rr := new(dns.PTR)
-	rr.Hdr = dns.RR_Header{Name: latest, Rrtype: dns.TypePTR, Ttl: 0}
-	rr.Ptr = FormatV1(pv)
-	return rr
-}
-
-func TxtRecord(pv *ProjectVersion) *dns.TXT {
-	latest := FormatV1(&ProjectVersion{pv.Project, "latest"})
-	rr := new(dns.TXT)
-	rr.Hdr = dns.RR_Header{Name: latest, Rrtype: dns.TypeTXT, Ttl: 0}
-	rr.Txt = []string{
-		"project=" + pv.Project,
-		"version=" + pv.Version,
-	}
-	return rr
-}
-
-type ProjectVersion struct {
-	Project string
-	Version string
-	// other client info?
-	// IPs or something might be interesting, but privacy concerns?
-	// use IP->Geo lookups?
-	// https://keen.io/docs/api/?shell#ip-to-geo-parser
-	// OS type?
-}
-
-func ParseV1(domain string) (*ProjectVersion, error) {
-	prefix := strings.TrimSuffix(domain, ".usage-v1.")
-	if len(prefix) == len(domain) {
-		return nil, errors.New("should end in '.usage-v1.'")
-	}
-
-	lastDot := strings.LastIndex(prefix, ".")
-	if lastDot < 0 {
-		return nil, errors.New("missing '.' separator")
-	}
-
-	version := prefix[:lastDot]
-	project := prefix[lastDot+1:]
-
-	if len(version) == 0 {
-		return nil, errors.New("version should not be empty")
-	}
-	if len(project) == 0 {
-		return nil, errors.New("project should not be empty")
-	}
-
-	return &ProjectVersion{project, version}, nil
-}
-
-func FormatV1(pv *ProjectVersion) string {
-	return fmt.Sprintf("%s.%s.usage-v1.", pv.Version, pv.Project)
-}
 
 type KeenEventTracker interface {
 	AddEvent(string, interface{}) error
@@ -80,11 +22,11 @@ type UsageTracker struct {
 	githubClient *github.Client
 }
 
-func (t *UsageTracker) Track(pv *ProjectVersion) error {
+func (t *UsageTracker) Track(pv *usage.ProjectVersion) error {
 	return t.keenClient.AddEvent("usage", pv)
 }
 
-func (t *UsageTracker) GetLatest(pv *ProjectVersion) (*ProjectVersion, error) {
+func (t *UsageTracker) GetLatest(pv *usage.ProjectVersion) (*usage.ProjectVersion, error) {
 	release, _, err := t.githubClient.Repositories.GetLatestRelease("gliderlabs", pv.Project)
 	if err != nil {
 		// TODO look for 404 errors
@@ -97,7 +39,7 @@ func (t *UsageTracker) GetLatest(pv *ProjectVersion) (*ProjectVersion, error) {
 	if release.TagName == nil {
 		return nil, errors.New("missing TagName")
 	}
-	return &ProjectVersion{pv.Project, *release.TagName}, nil
+	return &usage.ProjectVersion{pv.Project, *release.TagName}, nil
 }
 
 func (t *UsageTracker) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
@@ -106,7 +48,7 @@ func (t *UsageTracker) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 
 	q := r.Question[0].Name
 
-	pv, err := ParseV1(q)
+	pv, err := usage.ParseV1(q)
 	if err != nil {
 		log.Println(err)
 		return
@@ -140,11 +82,34 @@ func (t *UsageTracker) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	}
 }
 
+func PtrRecord(pv *usage.ProjectVersion) *dns.PTR {
+	latest := usage.FormatV1(&usage.ProjectVersion{pv.Project, "latest"})
+	rr := new(dns.PTR)
+	rr.Hdr = dns.RR_Header{Name: latest, Rrtype: dns.TypePTR, Ttl: 0}
+	rr.Ptr = usage.FormatV1(pv)
+	return rr
+}
+
+func TxtRecord(pv *usage.ProjectVersion) *dns.TXT {
+	latest := usage.FormatV1(&usage.ProjectVersion{pv.Project, "latest"})
+	rr := new(dns.TXT)
+	rr.Hdr = dns.RR_Header{Name: latest, Rrtype: dns.TypeTXT, Ttl: 0}
+	rr.Txt = []string{
+		"project=" + pv.Project,
+		"version=" + pv.Version,
+	}
+	return rr
+}
+
 var keenFlushInterval = flag.Duration("flush", 1*time.Second, "Flush interval for Keen.io")
 
 func main() {
 	keenProject := os.Getenv("KEEN_PROJECT")
 	keenWriteKey := os.Getenv("KEEN_WRITE_KEY")
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "53"
+	}
 
 	if keenProject == "" || keenWriteKey == "" {
 		log.Fatal("Please set both KEEN_PROJECT and KEEN_WRITE_KEY")
