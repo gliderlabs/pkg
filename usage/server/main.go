@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"log"
+	"net"
 	"os"
 	"time"
 
@@ -18,8 +19,9 @@ type KeenEventTracker interface {
 }
 
 type UsageTracker struct {
-	keenClient   KeenEventTracker
-	githubClient *github.Client
+	keenClient    KeenEventTracker
+	githubClient  *github.Client
+	githubProject string
 }
 
 func (t *UsageTracker) Track(pv *usage.ProjectVersion) error {
@@ -27,7 +29,7 @@ func (t *UsageTracker) Track(pv *usage.ProjectVersion) error {
 }
 
 func (t *UsageTracker) GetLatest(pv *usage.ProjectVersion) (*usage.ProjectVersion, error) {
-	release, _, err := t.githubClient.Repositories.GetLatestRelease("gliderlabs", pv.Project)
+	release, _, err := t.githubClient.Repositories.GetLatestRelease(t.githubProject, pv.Project)
 	if err != nil {
 		// TODO look for 404 errors
 		// 404 can mean that the project doesn't exist, or it has no releases yet
@@ -70,11 +72,7 @@ func (t *UsageTracker) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 		// tracking error is not fatal, so still return the results
 	}
 
-	m.Answer = append(
-		m.Answer,
-		PtrRecord(latest),
-		TxtRecord(latest),
-	)
+	m.Answer = append(m.Answer, PtrRecord(latest))
 
 	err = w.WriteMsg(m)
 	if err != nil {
@@ -90,29 +88,27 @@ func PtrRecord(pv *usage.ProjectVersion) *dns.PTR {
 	return rr
 }
 
-func TxtRecord(pv *usage.ProjectVersion) *dns.TXT {
-	latest := usage.FormatV1(&usage.ProjectVersion{pv.Project, "latest"})
-	rr := new(dns.TXT)
-	rr.Hdr = dns.RR_Header{Name: latest, Rrtype: dns.TypeTXT, Ttl: 0}
-	rr.Txt = []string{
-		"project=" + pv.Project,
-		"version=" + pv.Version,
-	}
-	return rr
-}
-
 var keenFlushInterval = flag.Duration("flush", 1*time.Second, "Flush interval for Keen.io")
 
 func main() {
 	keenProject := os.Getenv("KEEN_PROJECT")
 	keenWriteKey := os.Getenv("KEEN_WRITE_KEY")
+	githubProject := os.Getenv("GITHUB_PROJECT")
+
+	host := os.Getenv("HOST")
+	if host == "" {
+		host = "0.0.0.0"
+	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "53"
 	}
 
-	if keenProject == "" || keenWriteKey == "" {
-		log.Fatal("Please set both KEEN_PROJECT and KEEN_WRITE_KEY")
+	addr := net.JoinHostPort(host, port)
+
+	if keenProject == "" || keenWriteKey == "" || githubProject == "" {
+		log.Fatal("Please set KEEN_PROJECT, KEEN_WRITE_KEY, and GITHUB_PROJECT")
 	}
 
 	keenClient := &keen.Client{WriteKey: keenWriteKey, ProjectID: keenProject}
@@ -121,11 +117,12 @@ func main() {
 	githubClient := github.NewClient(nil)
 
 	tracker := UsageTracker{
-		keenClient:   keenBatchClient,
-		githubClient: githubClient,
+		keenClient:    keenBatchClient,
+		githubClient:  githubClient,
+		githubProject: githubProject,
 	}
 
-	err := dns.ListenAndServe(":5354", "udp", &tracker)
+	err := dns.ListenAndServe(addr, "udp", &tracker)
 	if err != nil {
 		log.Fatal(err)
 	}
