@@ -1,7 +1,7 @@
 FROM alpine:3.2
 ENTRYPOINT ["/bin/usage-tracker"]
 
-EXPOSE 53
+EXPOSE 53/udp
 
 COPY . /go/src/github.com/gliderlabs/pkg/usage
 RUN \
