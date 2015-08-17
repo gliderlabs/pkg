@@ -3,14 +3,14 @@ package usage
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
-	"time"
+	"sync"
 
 	"github.com/miekg/dns"
 )
 
-const dnsHost = "usage.gliderlabs.com"
-const dnsTimeout = 2 * time.Second
+const dnsHost = "usage.gliderlabs.io:53"
 
 type ProjectVersion struct {
 	Project string
@@ -32,20 +32,62 @@ func RequestLatest(pv *ProjectVersion) (*ProjectVersion, error) {
 	return nil, errors.New("no answer found")
 }
 
-func Send(pv *ProjectVersion) error {
-	// TODO could even start a go routine for this so it runs in the background
-	// without blocking at all for connecting
-	co, err := dns.DialTimeout("udp", dnsHost, dnsTimeout)
-	if err != nil {
-		return err
-	}
-	defer co.Close()
-	co.SetReadDeadline(time.Now().Add(dnsTimeout))
-	co.SetWriteDeadline(time.Now().Add(dnsTimeout))
+type checkResult struct {
+	pv  *ProjectVersion
+	err error
+}
 
-	msg := new(dns.Msg)
-	msg.SetQuestion(FormatV1(pv), dns.TypePTR)
-	return co.WriteMsg(msg)
+type Checker struct {
+	Current  *ProjectVersion
+	result   checkResult
+	resultCh chan checkResult
+	once     sync.Once
+}
+
+var CheckDisabledError = errors.New("Version check disabled by GL_DISABLE_VERSION_CHECK")
+
+func NewChecker(project, version string) *Checker {
+	current := ProjectVersion{project, version}
+	checker := Checker{Current: &current}
+
+	if os.Getenv("GL_DISABLE_VERSION_CHECK") != "" {
+		checker.once.Do(func() {
+			checker.result.err = CheckDisabledError
+		})
+	} else {
+		resultCh := make(chan checkResult)
+		checker.resultCh = resultCh
+
+		go func() {
+			latest, err := RequestLatest(&current)
+			resultCh <- checkResult{latest, err}
+		}()
+	}
+
+	return &checker
+}
+
+func (c *Checker) Latest() (string, error) {
+	c.once.Do(func() {
+		c.result = <-c.resultCh
+		close(c.resultCh)
+	})
+	if c.result.err != nil {
+		return "", c.result.err
+	}
+	return c.result.pv.Version, nil
+}
+
+func (c *Checker) PrintVersion() bool {
+	if len(os.Args) != 2 || os.Args[1] != "--version" {
+		return false
+	}
+	fmt.Println(c.Current.Version)
+	latest, err := c.Latest()
+	if err == nil && latest != c.Current.Version {
+		fmt.Printf("\nYour %s version is out of date!\nThe latest version is %s\n", c.Current.Project, latest)
+	}
+	return true
 }
 
 func ParseV1(domain string) (*ProjectVersion, error) {
