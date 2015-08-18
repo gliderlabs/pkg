@@ -24,7 +24,12 @@ type UsageTracker struct {
 	githubProject string
 }
 
-func (t *UsageTracker) Track(pv *usage.ProjectVersion) error {
+type TrackingEvent struct {
+	usage.ProjectVersion
+	ClientAddress string
+}
+
+func (t *UsageTracker) Track(pv *TrackingEvent) error {
 	return t.keenClient.AddEvent("usage", pv)
 }
 
@@ -66,8 +71,11 @@ func (t *UsageTracker) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 
 	// do this after getting the version so we don't track results for
 	// projects that aren't found
-	err = t.Track(pv)
-	if err != nil {
+	event := &TrackingEvent{*pv, ""}
+	if addr, ok := w.RemoteAddr().(*net.UDPAddr); ok {
+		event.ClientAddress = addr.IP.String()
+	}
+	if err = t.Track(event); err != nil {
 		log.Println(err)
 		// tracking error is not fatal, so still return the results
 	}
