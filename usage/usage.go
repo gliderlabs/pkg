@@ -55,12 +55,13 @@ func NewChecker(project, version string) *Checker {
 			checker.result.err = CheckDisabledError
 		})
 	} else {
-		resultCh := make(chan checkResult)
+		resultCh := make(chan checkResult, 1)
 		checker.resultCh = resultCh
 
 		go func() {
 			latest, err := RequestLatest(&current)
 			resultCh <- checkResult{latest, err}
+			close(resultCh)
 		}()
 	}
 
@@ -70,7 +71,6 @@ func NewChecker(project, version string) *Checker {
 func (c *Checker) Latest() (string, error) {
 	c.once.Do(func() {
 		c.result = <-c.resultCh
-		close(c.resultCh)
 	})
 	if c.result.err != nil {
 		return "", c.result.err
@@ -78,16 +78,12 @@ func (c *Checker) Latest() (string, error) {
 	return c.result.pv.Version, nil
 }
 
-func (c *Checker) PrintVersion() bool {
-	if len(os.Args) != 2 || os.Args[1] != "--version" {
-		return false
-	}
+func (c *Checker) PrintVersion() {
 	fmt.Println(c.Current.Version)
 	latest, err := c.Latest()
 	if err == nil && latest != c.Current.Version {
 		fmt.Printf("\nYour %s version is out of date!\nThe latest version is %s\n", c.Current.Project, latest)
 	}
-	return true
 }
 
 func ParseV1(domain string) (*ProjectVersion, error) {
