@@ -57,7 +57,7 @@ func (t *UsageTracker) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 
 	pv, err := usage.ParseV1(q)
 	if err != nil {
-		log.Println(err)
+		log.Printf("error parsing %s: %s", q, err)
 		return
 	}
 
@@ -65,7 +65,7 @@ func (t *UsageTracker) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	if err != nil {
 		// TODO if format is right, but project is missing,
 		// return an NXDOMAIN error
-		log.Println(err)
+		log.Printf("error fetching latest for %v: %s", pv, err)
 		return
 	}
 
@@ -76,7 +76,7 @@ func (t *UsageTracker) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 		event.ClientAddress = addr.IP.String()
 	}
 	if err = t.Track(event); err != nil {
-		log.Println(err)
+		log.Printf("error tracking %v: %s", event, err)
 		// tracking error is not fatal, so still return the results
 	}
 
@@ -84,7 +84,7 @@ func (t *UsageTracker) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 
 	err = w.WriteMsg(m)
 	if err != nil {
-		log.Println(err)
+		log.Printf("error writing response %v: %s", m, err)
 	}
 }
 
