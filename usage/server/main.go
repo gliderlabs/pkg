@@ -50,6 +50,9 @@ func (t *UsageTracker) GetLatest(pv *usage.ProjectVersion) (*usage.ProjectVersio
 }
 
 func (t *UsageTracker) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
+	var latest *usage.ProjectVersion
+	var event *TrackingEvent
+
 	m := new(dns.Msg)
 	m.SetReply(r)
 
@@ -57,21 +60,24 @@ func (t *UsageTracker) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 
 	pv, err := usage.ParseV1(q)
 	if err != nil {
-		log.Printf("error parsing %s: %s", q, err)
-		return
+		log.Printf("error parsing %s (%s): %s", q, w.RemoteAddr().(*net.UDPAddr).IP, err)
+		// m.Rcode = dns.RcodeRefused
+		m.Rcode = dns.RcodeNameError
+		goto response
 	}
 
-	latest, err := t.GetLatest(pv)
+	latest, err = t.GetLatest(pv)
 	if err != nil {
 		// TODO if format is right, but project is missing,
 		// return an NXDOMAIN error
 		log.Printf("error fetching latest for %v: %s", pv, err)
-		return
+		m.Rcode = dns.RcodeNameError
+		goto response
 	}
 
 	// do this after getting the version so we don't track results for
 	// projects that aren't found
-	event := &TrackingEvent{*pv, ""}
+	event = &TrackingEvent{*pv, ""}
 	if addr, ok := w.RemoteAddr().(*net.UDPAddr); ok {
 		event.ClientAddress = addr.IP.String()
 	}
@@ -82,6 +88,7 @@ func (t *UsageTracker) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 
 	m.Answer = append(m.Answer, PtrRecord(latest))
 
+response:
 	err = w.WriteMsg(m)
 	if err != nil {
 		log.Printf("error writing response %v: %s", m, err)
