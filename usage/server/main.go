@@ -5,8 +5,11 @@ import (
 	"flag"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"time"
+
+	"golang.org/x/oauth2"
 
 	"github.com/gliderlabs/pkg/usage"
 	"github.com/google/go-github/github"
@@ -109,6 +112,7 @@ func main() {
 	keenProject := os.Getenv("KEEN_PROJECT")
 	keenWriteKey := os.Getenv("KEEN_WRITE_KEY")
 	githubProject := os.Getenv("GITHUB_PROJECT")
+	githubToken := os.Getenv("GITHUB_ACCESS_TOKEN")
 
 	host := os.Getenv("HOST")
 	if host == "" {
@@ -129,7 +133,15 @@ func main() {
 	keenClient := &keen.Client{WriteKey: keenWriteKey, ProjectID: keenProject}
 	keenBatchClient := keen.NewBatchClient(keenClient, *keenFlushInterval)
 
-	githubClient := github.NewClient(nil)
+	var authClient *http.Client
+
+	if githubToken != "" {
+		authClient = oauth2.NewClient(oauth2.NoContext, oauth2.StaticTokenSource(
+			&oauth2.Token{AccessToken: githubToken},
+		))
+	}
+
+	githubClient := github.NewClient(authClient)
 
 	tracker := UsageTracker{
 		keenClient:    keenBatchClient,
