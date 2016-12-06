@@ -33,14 +33,16 @@ type UserInfo map[string]interface{}
 type User map[string]interface{}
 
 func (c *Client) LogoutURL(returnTo string) string {
-	logoutURL := &url.URL{
-		Scheme: "https",
-		Host:   c.Domain,
-		Path:   "/v2/logout",
-	}
-	logoutURL.Query().Set("clientId", c.ClientID)
+	q := url.Values{}
+	q.Set("clientId", c.ClientID)
 	if returnTo != "" {
-		logoutURL.Query().Set("returnTo", returnTo)
+		q.Set("returnTo", returnTo)
+	}
+	logoutURL := &url.URL{
+		Scheme:   "https",
+		Host:     c.Domain,
+		Path:     "/v2/logout",
+		RawQuery: q.Encode(),
 	}
 	return logoutURL.String()
 }
