@@ -34,7 +34,7 @@ type User map[string]interface{}
 
 func (c *Client) LogoutURL(returnTo string) string {
 	q := url.Values{}
-	q.Set("clientId", c.ClientID)
+	q.Set("client_id", c.ClientID)
 	if returnTo != "" {
 		q.Set("returnTo", returnTo)
 	}
